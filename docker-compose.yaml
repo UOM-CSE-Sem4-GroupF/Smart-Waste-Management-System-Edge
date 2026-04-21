@@ -1,0 +1,12 @@
+services:
+  simulator:
+    build: .
+    container_name: swms-edge-simulator
+    env_file:
+      - .env
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
