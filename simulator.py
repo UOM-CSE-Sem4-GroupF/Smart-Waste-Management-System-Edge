@@ -14,14 +14,14 @@ logger = logging.getLogger(__name__)
 # Load config from .env
 load_dotenv()
 
+# Configuration
 BROKER = os.getenv("MQTT_BROKER")
 PORT = int(os.getenv("MQTT_PORT", 1883))
 USER = os.getenv("MQTT_USER")
 PASS = os.getenv("MQTT_PASSWORD")
-TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "sensors")
+TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX")
+BIN_ID = os.getenv("MQTT_BIN_ID")
 
-# Mock Bin Configuration
-BIN_ID = "bin-node-001"
 TARGET_TOPIC = f"{TOPIC_PREFIX}/{BIN_ID}/telemetry"
 
 def on_connect(client, userdata, flags, rc):
