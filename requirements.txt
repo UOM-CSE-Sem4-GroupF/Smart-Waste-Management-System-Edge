@@ -1,2 +1,4 @@
 paho-mqtt==1.6.1
 python-dotenv==1.0.0
+jsonschema==4.21.1
+pytest==8.0.0
