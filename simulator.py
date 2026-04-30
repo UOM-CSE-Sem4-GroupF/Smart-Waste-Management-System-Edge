@@ -1,242 +1,193 @@
-"""SWMS Edge Simulator — entrypoint.
-
-Per-bin state and payload generation now live in `simulator/bin_sensor.py`;
-durable spooling for failed publishes lives in `simulator/buffer.py`. This
-module wires those together with paho-mqtt and the bin fleet definition.
-
-Behaviour preserved from the previous version:
-  * Loads MQTT settings from .env
-  * Spawns one thread per bin with staggered starts
-  * SIM_SPEED_FACTOR compresses time for desk demos
-  * Ctrl+C exits cleanly
-
-New behaviour:
-  * If a publish is rejected because the broker is unreachable, the
-    payload is appended to a SQLite spool. On reconnect, the spool is
-    drained in FIFO order so no readings are lost across short outages.
-"""
-from __future__ import annotations
-
-import logging
 import os
-import random
-import sys
-import threading
 import time
-from pathlib import Path
-
-import paho.mqtt.client as mqtt
+import json
+import random
+import logging
+import threading
+from datetime import datetime, timezone
 from dotenv import load_dotenv
+import paho.mqtt.client as mqtt
 
-# Make the in-repo simulator/ package importable whether the script is run
-# from the repo root (`python simulator.py`) or via Docker (WORKDIR=/app).
-sys.path.insert(0, str(Path(__file__).resolve().parent / "simulator"))
-from bin_sensor import BinSensor   # noqa: E402
-from buffer import TelemetryBuffer   # noqa: E402
-
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("swms-edge-sim")
 
 load_dotenv()
 
 BROKER       = os.getenv("MQTT_BROKER")
-PORT         = int(os.getenv("MQTT_PORT", "1883"))
+PORT         = int(os.getenv("MQTT_PORT", 1883))
 USER         = os.getenv("MQTT_USER")
 PASS         = os.getenv("MQTT_PASSWORD")
 TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "sensors")
-FIRMWARE_VER = os.getenv("FIRMWARE_VERSION", "2.1.4")
+FIRMWARE_VER = "2.1.4"
 
 # SIM_SPEED_FACTOR compresses time so intervals behave realistically at desk-demo speed.
 # 1.0 = real time (10-min sleep between low-fill readings).
 # 60  = 1 real second equals 1 simulated minute (good for demos).
 SPEED = float(os.getenv("SIM_SPEED_FACTOR", "60"))
 
-# Durable spool — survives process restarts so a crash mid-outage doesn't lose readings.
-SPOOL_PATH     = os.getenv("SIM_SPOOL_PATH", "spool.db")
-SPOOL_MAX_SIZE = int(os.getenv("SIM_SPOOL_MAX_SIZE", "10000"))
-
 # ---------------------------------------------------------------------------
 # Bin fleet definition
 # Each entry: bin_id, zone_id, waste_category, volume_litres
 # ---------------------------------------------------------------------------
-BINS: list[dict] = [
-    {"bin_id": "BIN-001", "zone_id": 1, "waste_category": "food_waste", "volume_litres": 240},
-    {"bin_id": "BIN-002", "zone_id": 1, "waste_category": "general",    "volume_litres": 240},
-    {"bin_id": "BIN-003", "zone_id": 2, "waste_category": "paper",      "volume_litres": 360},
-    {"bin_id": "BIN-004", "zone_id": 2, "waste_category": "plastic",    "volume_litres": 240},
-    {"bin_id": "BIN-005", "zone_id": 2, "waste_category": "glass",      "volume_litres": 120},
-    {"bin_id": "BIN-006", "zone_id": 3, "waste_category": "food_waste", "volume_litres": 240},
-    {"bin_id": "BIN-007", "zone_id": 3, "waste_category": "general",    "volume_litres": 360},
-    {"bin_id": "BIN-008", "zone_id": 3, "waste_category": "plastic",    "volume_litres": 240},
-    {"bin_id": "BIN-009", "zone_id": 4, "waste_category": "glass",      "volume_litres": 120},
-    {"bin_id": "BIN-010", "zone_id": 4, "waste_category": "general",    "volume_litres": 240},
+BINS = [
+    {"bin_id": "BIN-001", "zone_id": 1, "waste_category": "food_waste",  "volume_litres": 240},
+    {"bin_id": "BIN-002", "zone_id": 1, "waste_category": "general",     "volume_litres": 240},
+    {"bin_id": "BIN-003", "zone_id": 2, "waste_category": "paper",       "volume_litres": 360},
+    {"bin_id": "BIN-004", "zone_id": 2, "waste_category": "plastic",     "volume_litres": 240},
+    {"bin_id": "BIN-005", "zone_id": 2, "waste_category": "glass",       "volume_litres": 120},
+    {"bin_id": "BIN-006", "zone_id": 3, "waste_category": "food_waste",  "volume_litres": 240},
+    {"bin_id": "BIN-007", "zone_id": 3, "waste_category": "general",     "volume_litres": 360},
+    {"bin_id": "BIN-008", "zone_id": 3, "waste_category": "plastic",     "volume_litres": 240},
+    {"bin_id": "BIN-009", "zone_id": 4, "waste_category": "glass",       "volume_litres": 120},
+    {"bin_id": "BIN-010", "zone_id": 4, "waste_category": "general",     "volume_litres": 240},
 ]
 
+# Base fill rate per hour (%) by waste category.
+# Food waste fills fastest (high turnover near markets/restaurants).
+# Glass fills slowest (heavy per litre but low volume disposal rate).
+BASE_FILL_RATES = {
+    "food_waste": (4.0, 8.0),   # min, max %/hour
+    "general":    (2.0, 4.0),
+    "paper":      (1.0, 3.0),
+    "plastic":    (0.8, 2.0),
+    "glass":      (0.3, 1.0),
+}
 
-class EdgeClient:
-    """Wraps the paho client + the durable spool.
+def time_of_day_multiplier(category: str) -> float:
+    """Return a fill-rate multiplier based on current hour and waste category."""
+    hour = datetime.now().hour
+    # Only food_waste and general react strongly to human activity rhythms
+    if category in ("food_waste", "general"):
+        if 7 <= hour < 10:    return 1.8   # morning rush
+        if 12 <= hour < 14:   return 1.5   # lunch
+        if 18 <= hour < 21:   return 2.0   # evening peak
+        if hour >= 23 or hour < 6: return 0.3  # overnight quiet
+    return 1.0
 
-    `publish_or_spool()` is the single call site bin threads use; it tries
-    the broker first and falls back to disk if the broker isn't reachable.
-    On reconnect, the spool drains in order on a background thread so the
-    paho network loop is never blocked by replay I/O.
-    """
+def publish_interval_seconds(fill_pct: float) -> float:
+    """Return the real sleep interval per the firmware spec, divided by SPEED."""
+    if fill_pct < 50:
+        raw = 600   # 10 minutes
+    elif fill_pct < 75:
+        raw = 300   # 5 minutes
+    elif fill_pct < 90:
+        raw = 120   # 2 minutes
+    else:
+        raw = 30    # 30 seconds — urgent
+    return raw / SPEED
 
-    def __init__(self, client: mqtt.Client, buffer: TelemetryBuffer) -> None:
-        self.client = client
-        self.buffer = buffer
-        self._connected = threading.Event()
-        self._flush_lock = threading.Lock()   # one drain at a time
-
-    # -- paho callbacks ----------------------------------------------------
-
-    def on_connect(self, _client: mqtt.Client, _userdata, _flags, rc: int) -> None:
-        if rc != 0:
-            logger.error(f"MQTT connection failed (rc={rc})")
-            return
+def on_connect(client, userdata, flags, rc):
+    if rc == 0:
         logger.info(f"Connected to EMQX at {BROKER}:{PORT}")
-        self._connected.set()
-        depth = self.buffer.depth()
-        if depth:
-            logger.info(f"Spool has {depth} message(s); replaying in background")
-            threading.Thread(target=self._drain_spool, daemon=True).start()
+    else:
+        logger.error(f"MQTT connection failed (rc={rc})")
 
-    def on_disconnect(self, _client: mqtt.Client, _userdata, rc: int) -> None:
-        self._connected.clear()
-        if rc != 0:
-            logger.warning(f"Unexpected MQTT disconnect (rc={rc}); spooling locally")
-        else:
-            logger.info("MQTT disconnected cleanly")
+def run_bin_loop(client: mqtt.Client, cfg: dict):
+    """Simulate one bin — runs forever in its own thread."""
+    bin_id   = cfg["bin_id"]
+    category = cfg["waste_category"]
+    zone_id  = cfg["zone_id"]
 
-    # -- bin-thread interface ---------------------------------------------
+    # Initial state: start bins at varied fill levels so they don't all go urgent at once
+    fill = random.uniform(5.0, 40.0)
+    battery = random.uniform(85.0, 100.0)
+    signal_base = random.randint(-78, -55)   # dBm — stable per device, slight variation
 
-    def publish_or_spool(self, topic: str, payload: str) -> None:
-        """Try the broker; on any failure persist to the spool for replay."""
-        if self._connected.is_set():
-            info = self.client.publish(topic, payload, qos=1)
-            if info.rc == mqtt.MQTT_ERR_SUCCESS:
-                return
-            logger.warning(f"Publish rejected (rc={info.rc}); spooling")
-        self.buffer.enqueue(topic, payload)
+    topic = f"{TOPIC_PREFIX}/bin/{bin_id}/telemetry"
 
-    # -- internals ---------------------------------------------------------
+    min_rate, max_rate = BASE_FILL_RATES[category]
+    # Each bin gets its own base rate (reflects location-specific usage patterns)
+    bin_base_rate = random.uniform(min_rate, max_rate)
 
-    def _drain_spool(self) -> None:
-        # _flush_lock keeps two on_connect events (e.g. brief flap) from
-        # racing each other through the same rows.
-        if not self._flush_lock.acquire(blocking=False):
-            return
-        try:
-            sent = self.buffer.flush(self._publish_one)
-            remaining = self.buffer.depth()
-            logger.info(f"Spool drain complete: sent={sent}, remaining={remaining}")
-        except Exception as exc:
-            logger.warning(f"Spool drain interrupted: {exc}")
-        finally:
-            self._flush_lock.release()
-
-    def _publish_one(self, topic: str, payload: str) -> bool:
-        if not self._connected.is_set():
-            return False
-        info = self.client.publish(topic, payload, qos=1)
-        return info.rc == mqtt.MQTT_ERR_SUCCESS
-
-
-# ---------------------------------------------------------------------------
-# Per-bin loop
-# ---------------------------------------------------------------------------
-
-def run_bin_loop(edge: EdgeClient, cfg: dict) -> None:
-    sensor = BinSensor(
-        bin_id=cfg["bin_id"],
-        zone_id=cfg["zone_id"],
-        waste_category=cfg["waste_category"],
-        volume_litres=cfg["volume_litres"],
-        firmware_version=FIRMWARE_VER,
-        rng=random.Random(),
-    )
-    topic = sensor.telemetry_topic(prefix=TOPIC_PREFIX)
-
-    logger.info(
-        f"[{sensor.bin_id}] Starting — category={sensor.waste_category} "
-        f"zone={sensor.zone_id} fill={sensor.fill_pct:.1f}% "
-        f"rate={sensor.base_fill_rate:.2f}%/hr"
-    )
+    logger.info(f"[{bin_id}] Starting — category={category} zone={zone_id} "
+                f"fill={fill:.1f}% rate={bin_base_rate:.2f}%/hr")
 
     last_publish_time = time.monotonic()
+
     while True:
         now = time.monotonic()
         elapsed_real_seconds = now - last_publish_time
         elapsed_sim_hours = (elapsed_real_seconds * SPEED) / 3600.0
 
-        payload = sensor.tick(elapsed_sim_hours=elapsed_sim_hours)
-        edge.publish_or_spool(topic, _serialise(payload))
+        # Advance fill level based on elapsed simulated time
+        rate = bin_base_rate * time_of_day_multiplier(category)
+        fill += rate * elapsed_sim_hours
+        fill += random.gauss(0, 0.2)   # sensor noise
+        fill = max(0.0, min(fill, 100.0))
 
-        # Rapid-fill detection: if the bin jumped >10% this tick, drop straight
-        # to the next-shorter interval rather than waiting out the band default.
-        interval = sensor.publish_interval_seconds(speed=SPEED)
-        if sensor.rapid_fill_detected():
-            interval = min(interval, 30.0 / SPEED)
-            logger.info(f"[{sensor.bin_id}] Rapid fill detected — shortening interval")
+        # Collection event: driver empties the bin
+        if fill >= 95.0:
+            new_fill = random.uniform(2.0, 8.0)
+            logger.info(f"[{bin_id}] *** COLLECTED *** fill {fill:.1f}% → reset to {new_fill:.1f}%")
+            fill = new_fill
 
+        # Battery drain: ~0.005% per reading cycle, "replaced" when critically low
+        battery -= random.uniform(0.003, 0.008)
+        if battery < 15.0:
+            battery = random.uniform(92.0, 100.0)
+            logger.info(f"[{bin_id}] Battery replaced → {battery:.1f}%")
+
+        # Signal strength: stable with small jitter
+        signal = signal_base + random.randint(-3, 3)
+
+        # Temperature: ambient variation (warmer midday, cooler at night)
+        hour = datetime.now().hour
+        base_temp = 22.0 + 8.0 * abs(hour - 14) / 14.0 * -1 + 8.0  # peaks ~14:00
+        temperature = round(base_temp + random.gauss(0, 1.5), 1)
+        temperature = max(15.0, min(45.0, temperature))
+
+        # error_flags: 0 = normal; bit 0 = sensor read error (~1% of readings)
+        error_flags = 1 if random.random() < 0.01 else 0
+
+        payload = {
+            "bin_id":               bin_id,
+            "fill_level_pct":       round(fill, 2),
+            "battery_level_pct":    round(battery, 1),
+            "signal_strength_dbm":  signal,
+            "temperature_c":        temperature,
+            "timestamp":            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "firmware_version":     FIRMWARE_VER,
+            "error_flags":          error_flags,
+        }
+
+        payload_json = json.dumps(payload)
+        client.publish(topic, payload_json, qos=1)
+
+        interval = publish_interval_seconds(fill)
         logger.info(
-            f"[{sensor.bin_id}] fill={payload['fill_level_pct']:5.1f}% "
-            f"bat={payload['battery_level_pct']:4.1f}% "
-            f"sig={payload['signal_strength_dbm']}dBm  →  "
-            f"next in {interval:.0f}s  (topic: {topic})"
+            f"[{bin_id}] fill={fill:5.1f}% bat={battery:4.1f}% "
+            f"sig={signal}dBm  →  next in {interval:.0f}s  (topic: {topic})"
         )
 
         last_publish_time = time.monotonic()
         time.sleep(interval)
 
 
-def _serialise(payload: dict) -> str:
-    import json
-    return json.dumps(payload)
-
-
-# ---------------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------------
-
-def main() -> None:
-    if not BROKER:
-        logger.error("MQTT_BROKER is not set — see .env.example")
-        return
-
-    buffer = TelemetryBuffer(SPOOL_PATH, max_size=SPOOL_MAX_SIZE)
-    if buffer.depth():
-        logger.info(f"Resuming with {buffer.depth()} message(s) already spooled")
-
+def main():
     client = mqtt.Client(client_id="swms-edge-simulator")
-    if USER:
-        client.username_pw_set(USER, PASS)
-
-    edge = EdgeClient(client, buffer)
-    client.on_connect = edge.on_connect
-    client.on_disconnect = edge.on_disconnect
+    client.username_pw_set(USER, PASS)
+    client.on_connect = on_connect
 
     logger.info(f"Connecting to EMQX at {BROKER}:{PORT} ...")
     try:
         client.connect(BROKER, PORT, keepalive=60)
     except Exception as e:
-        # Even if the initial connect fails, the loop_start below + paho's
-        # auto-reconnect will keep retrying; bin threads spool in the meantime.
-        logger.warning(f"Initial broker connect failed: {e} — bins will spool until reconnect")
+        logger.error(f"Cannot connect to broker: {e}")
+        return
 
     client.loop_start()
-    time.sleep(2)   # let CONNACK arrive before bin threads start publishing
+    # Brief pause to let the CONNACK arrive before threads start publishing
+    time.sleep(2)
 
-    threads: list[threading.Thread] = []
+    threads = []
     for cfg in BINS:
-        t = threading.Thread(target=run_bin_loop, args=(edge, cfg), daemon=True)
+        t = threading.Thread(target=run_bin_loop, args=(client, cfg), daemon=True)
         t.start()
         threads.append(t)
-        # Stagger so all 10 bins don't publish simultaneously on tick 0.
+        # Stagger starts so all 10 bins don't publish simultaneously on tick 0
         time.sleep(random.uniform(0.3, 1.2))
 
-    logger.info(f"All {len(BINS)} bin simulators running (SPEED={SPEED}x, spool={SPOOL_PATH}).")
+    logger.info(f"All {len(BINS)} bin simulators running (SPEED={SPEED}x).")
     try:
         while True:
             time.sleep(60)
@@ -245,7 +196,6 @@ def main() -> None:
     finally:
         client.loop_stop()
         client.disconnect()
-        buffer.close()
 
 
 if __name__ == "__main__":
