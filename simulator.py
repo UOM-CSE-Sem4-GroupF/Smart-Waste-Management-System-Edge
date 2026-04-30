@@ -30,9 +30,9 @@ from dotenv import load_dotenv
 
 # Make the in-repo simulator/ package importable whether the script is run
 # from the repo root (`python simulator.py`) or via Docker (WORKDIR=/app).
-
-from simulator.bin_sensor import BinSensor   # noqa: E402
-from simulator.buffer import TelemetryBuffer   # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parent / "simulator"))
+from bin_sensor import BinSensor   # noqa: E402
+from buffer import TelemetryBuffer   # noqa: E402
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
