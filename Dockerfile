@@ -10,8 +10,10 @@ COPY requirements.txt .
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the simulator script into the container
+# Copy the simulator runtime and package modules into the container
 COPY simulator.py .
+COPY simulator/ ./simulator/
 
-# Command to run the simulator
+EXPOSE 9102
+
 CMD ["python", "simulator.py"]

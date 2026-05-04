@@ -126,6 +126,7 @@ class BinSensor:
         if now is None:
             now = datetime.now(timezone.utc)
 
+        previous_fill_pct = self.fill_pct
         self._advance_fill(elapsed_sim_hours, hour=now.astimezone().hour)
         collected = self._maybe_collect()
         self._drain_battery()
@@ -144,9 +145,9 @@ class BinSensor:
             "firmware_version":    self.firmware_version,
             "error_flags":         error_flags,
         }
-        # Track last fill *after* publish so rapid-fill detection compares
-        # against the previous reading, not the current one.
-        self.last_fill_pct = self.fill_pct
+        # Keep the previous reading available after tick() so callers can
+        # decide whether this publish needs the rapid-fill interval.
+        self.last_fill_pct = previous_fill_pct
         # `collected` is intentionally not part of the wire payload — it's
         # internal-only state for tests/log lines to consult via the return
         # of had_collection_event() if needed in the future.
