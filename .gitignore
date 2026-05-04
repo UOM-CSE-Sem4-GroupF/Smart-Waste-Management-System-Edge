@@ -43,3 +43,6 @@ venv.bak
 # OS
 .DS_Store
 Thumbs.db
+
+gateway/nodered_data/.npm
+gateway/nodered_data/node_modules
