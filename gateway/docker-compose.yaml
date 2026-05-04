@@ -1,0 +1,26 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto
+    container_name: mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  nodered:
+    image: nodered/node-red
+    container_name: nodered
+    ports:
+      - "1880:1880"
+    depends_on:
+      - mosquitto
+    environment:
+      MQTT_BROKER: mosquitto
+      MQTT_PORT: "1883"
+      CLOUD_MQTT_BROKER: ${CLOUD_MQTT_BROKER:-emqx}
+      CLOUD_MQTT_PORT: ${CLOUD_MQTT_PORT:-1883}
+      CLOUD_MQTT_USER: ${CLOUD_MQTT_USER:-gateway}
+      CLOUD_MQTT_PASSWORD: ${CLOUD_MQTT_PASSWORD:-gatewaypass}
+    volumes:
+      - ./flows.json:/data/flows.json:ro
+      - ./settings.js:/data/settings.js:ro
