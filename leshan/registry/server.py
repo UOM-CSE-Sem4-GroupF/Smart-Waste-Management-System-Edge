@@ -20,6 +20,20 @@ class RegistryHandler(BaseHTTPRequestHandler):
         if self.path == "/ready":
             self._json({"status": "ready"})
             return
+        if self.path == "/metrics":
+            with LOCK:
+                registered = len(DEVICES)
+            body = (
+                "# HELP edge_registered_devices Number of simulated devices in registry\n"
+                "# TYPE edge_registered_devices gauge\n"
+                f"edge_registered_devices {registered}\n"
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("content-type", "text/plain; version=0.0.4")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == "/devices":
             with LOCK:
                 devices = sorted(DEVICES.values(), key=lambda item: item["bin_id"])
