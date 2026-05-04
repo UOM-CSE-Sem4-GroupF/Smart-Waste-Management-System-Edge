@@ -1,0 +1,58 @@
+name: e2e
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "ops/**"
+      - "simulator.py"
+      - "simulator/**"
+      - "gateway/**"
+      - "broker/**"
+      - "leshan/**"
+      - ".github/workflows/e2e.yaml"
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r leshan/cli/requirements.txt
+
+      - name: Start full stack
+        run: |
+          docker compose -f ops/docker-compose.full.yaml up -d --build
+
+      - name: Wait for core services
+        run: |
+          timeout 180 bash -c 'until curl -fsS http://localhost:9102/health; do sleep 5; done'
+          timeout 180 bash -c 'until curl -fsS http://localhost:1880/health; do sleep 5; done'
+          timeout 180 bash -c 'until curl -fsS http://localhost:9101/health; do sleep 5; done'
+          timeout 180 bash -c 'until curl -fsS http://localhost:8090/health; do sleep 5; done'
+
+      - name: Run live e2e tests
+        env:
+          RUN_E2E: "1"
+        run: |
+          pytest ops/integration -q
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker compose -f ops/docker-compose.full.yaml ps
+          docker compose -f ops/docker-compose.full.yaml logs --tail=200
+
+      - name: Stop stack
+        if: always()
+        run: |
+          docker compose -f ops/docker-compose.full.yaml down -v
