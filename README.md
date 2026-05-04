@@ -23,7 +23,7 @@ Useful URLs:
 |---|---|
 | Node-RED | http://localhost:1880 |
 | Kafka UI | http://localhost:8080 |
-| Leshan demo UI | http://localhost:8081 |
+| Leshan-style demo UI | http://localhost:8081 |
 | Device registry | http://localhost:8090/devices |
 | EMQX dashboard | http://localhost:18083 |
 | Prometheus | http://localhost:9090 |

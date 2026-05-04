@@ -2,7 +2,7 @@
 
 This directory provides the Person 4 demo path while hardware work is handled separately:
 
-- Eclipse Leshan demo server in Docker.
+- Local Leshan-style demo UI in Docker.
 - A lightweight HTTP device registry for simulator heartbeats and firmware versions.
 - An MQTT OTA CLI that sends firmware commands and waits for simulator acknowledgements.
 
@@ -15,7 +15,7 @@ docker compose up
 
 Local URLs:
 
-- Leshan demo UI: http://localhost:8081
+- Leshan-style demo UI: http://localhost:8081
 - Simulated device registry: http://localhost:8090/devices
 
 The simulator reports to the registry when `LESHAN_REGISTRY_URL` is set:

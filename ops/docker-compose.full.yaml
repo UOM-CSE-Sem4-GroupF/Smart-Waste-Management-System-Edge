@@ -181,12 +181,12 @@ services:
       - edge-net
 
   leshan:
-    image: leshan/leshan-server-demo:latest
+    build:
+      context: ../leshan/mock
+      dockerfile: Dockerfile
     container_name: swms-leshan-demo
     ports:
       - "8081:8080"
-      - "5683:5683/udp"
-      - "5684:5684/udp"
     restart: unless-stopped
     networks:
       - edge-net
