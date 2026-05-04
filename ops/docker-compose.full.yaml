@@ -163,8 +163,8 @@ services:
 
   validator:
     build:
-      context: ../broker/validator
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: broker/validator/Dockerfile
     container_name: swms-schema-validator
     restart: unless-stopped
     depends_on:

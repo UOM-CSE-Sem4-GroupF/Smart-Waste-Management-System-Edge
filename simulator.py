@@ -228,13 +228,13 @@ class EdgeClient:
         """Try the broker; on any failure persist to the spool for replay."""
         if self._connected.is_set():
             start = time.monotonic()
-            info = self.client.publish(topic, payload, qos=1)
+            published = self._publish_confirmed(topic, payload)
             publish_latency_seconds.labels(component="simulator").observe(
                 time.monotonic() - start
             )
-            if info.rc == mqtt.MQTT_ERR_SUCCESS:
+            if published:
                 return
-            logger.warning(f"Publish rejected (rc={info.rc}); spooling")
+            logger.warning("Publish was not confirmed; spooling")
         self.buffer.enqueue(topic, payload)
         publish_failures_total.labels(component="simulator").inc()
         buffer_depth.labels(component="simulator").set(self.buffer.depth())
@@ -259,8 +259,14 @@ class EdgeClient:
     def _publish_one(self, topic: str, payload: str) -> bool:
         if not self._connected.is_set():
             return False
+        return self._publish_confirmed(topic, payload)
+
+    def _publish_confirmed(self, topic: str, payload: str, timeout: float = 5.0) -> bool:
         info = self.client.publish(topic, payload, qos=1)
-        return info.rc == mqtt.MQTT_ERR_SUCCESS
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            return False
+        info.wait_for_publish(timeout=timeout)
+        return info.is_published()
 
 
 # ---------------------------------------------------------------------------
@@ -316,7 +322,7 @@ def run_bin_loop(edge: EdgeClient, cfg: dict) -> None:
         # to the next-shorter interval rather than waiting out the band default.
         interval = sensor.publish_interval_seconds(speed=SPEED)
         if sensor.rapid_fill_detected():
-            interval = min(interval, 30.0 / SPEED)
+            interval = next_shorter_interval_seconds(interval, speed=SPEED)
             logger.info(f"[{sensor.bin_id}] Rapid fill detected — shortening interval")
 
         logger.info(
@@ -332,6 +338,14 @@ def run_bin_loop(edge: EdgeClient, cfg: dict) -> None:
 
 def _serialise(payload: dict) -> str:
     return json.dumps(payload)
+
+
+def next_shorter_interval_seconds(current_interval: float, speed: float) -> float:
+    bands = [600.0 / speed, 300.0 / speed, 120.0 / speed, 30.0 / speed]
+    for idx, band in enumerate(bands[:-1]):
+        if current_interval >= band:
+            return bands[idx + 1]
+    return bands[-1]
 
 
 def _utc_now() -> str:

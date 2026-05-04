@@ -125,8 +125,8 @@ services:
 
   validator:
     build:
-      context: ./validator
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: broker/validator/Dockerfile
     container_name: schema-validator
     restart: unless-stopped
     depends_on:

@@ -13,6 +13,9 @@ This component owns the MQTT broker (EMQX), the Kafka message bus, and the bridg
 | MQTT→Kafka bridge | 9100 (/metrics) | Bridge process + metrics |
 | Schema validator | 9101 (/metrics) | Contract test consumer |
 
+The validator uses the canonical telemetry schema at
+`../simulator/schemas/telemetry.schema.json`.
+
 ## Quickstart
 
 ```bash
@@ -107,7 +110,6 @@ broker/
 ├── validator/
 │   ├── main.py            # Schema validator consumer
 │   ├── Dockerfile
-│   ├── requirements.txt
-│   └── telemetry.schema.json
+│   └── requirements.txt
 └── README.md
 ```

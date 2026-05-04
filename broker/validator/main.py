@@ -91,7 +91,12 @@ class ValidatorConsumer:
         self.running = True
         self.consumer.subscribe([KAFKA_TOPIC])
         log.info(f"Subscribed to Kafka topic: {KAFKA_TOPIC}")
-        ready_flag = True
+        try:
+            self.consumer.list_topics(topic=KAFKA_TOPIC, timeout=10)
+            ready_flag = True
+        except KafkaException as exc:
+            ready_flag = False
+            log.warning(f"Kafka metadata lookup failed; readiness remains false: {exc}")
 
         try:
             while self.running:

@@ -53,6 +53,7 @@ msgs_forwarded = Counter("edge_bridge_forwarded_total", "Messages forwarded to K
 msgs_dropped   = Counter("edge_bridge_dropped_total",   "Messages dropped (bad JSON, routing error)", ["reason"])
 kafka_connected = Gauge("edge_mqtt_connected", "1 if bridge is connected to MQTT", ["component"])
 publish_latency = Histogram("edge_publish_latency_seconds", "Kafka publish latency", ["kafka_topic"])
+ready_flag = False
 
 
 def build_envelope(payload_dict: dict) -> dict:
@@ -115,18 +116,23 @@ class MQTTBridge:
         self.client.on_message    = self._on_message
 
     def _on_connect(self, client, userdata, flags, rc, properties=None):
+        global ready_flag
         if rc == 0:
             log.info(f"Connected to EMQX at {EMQX_HOST}:{EMQX_PORT}")
             kafka_connected.labels(component="emqx-bridge").set(1)
+            ready_flag = True
             client.subscribe(MQTT_SUBSCRIPTIONS)
             log.info(f"Subscribed to {[t for t, _ in MQTT_SUBSCRIPTIONS]}")
         else:
             log.error(f"MQTT connect failed with code {rc}")
             kafka_connected.labels(component="emqx-bridge").set(0)
+            ready_flag = False
 
     def _on_disconnect(self, client, userdata, rc, properties=None):
+        global ready_flag
         log.warning(f"Disconnected from EMQX (rc={rc}), will reconnect...")
         kafka_connected.labels(component="emqx-bridge").set(0)
+        ready_flag = False
 
     def _on_message(self, client, userdata, msg):
         mqtt_topic = msg.topic
@@ -165,12 +171,25 @@ class MQTTBridge:
 
 class MetricsServer(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path in ("/metrics", "/health", "/ready"):
+        if self.path == "/metrics":
             body = generate_latest()
             self.send_response(200)
             self.send_header("Content-Type", CONTENT_TYPE_LATEST)
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/health":
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"ok")
+        elif self.path == "/ready":
+            if ready_flag:
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ready")
+            else:
+                self.send_response(503)
+                self.end_headers()
+                self.wfile.write(b"not ready")
         else:
             self.send_response(404)
             self.end_headers()
