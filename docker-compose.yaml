@@ -11,6 +11,8 @@ services:
       MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-sensors}
       SIM_SPEED_FACTOR: ${SIM_SPEED_FACTOR:-60}
       SIM_METRICS_PORT: ${SIM_METRICS_PORT:-9102}
+      LESHAN_REGISTRY_URL: ${LESHAN_REGISTRY_URL:-}
+      OTA_FAILURE_RATE: ${OTA_FAILURE_RATE:-0.05}
     ports:
       - "9102:9102"
     restart: unless-stopped

@@ -23,6 +23,8 @@ import os
 import random
 import threading
 import time
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -66,6 +68,8 @@ SPOOL_PATH     = os.getenv("SIM_SPOOL_PATH", "spool.db")
 SPOOL_MAX_SIZE = int(os.getenv("SIM_SPOOL_MAX_SIZE", "10000"))
 METRICS_PORT   = int(os.getenv("SIM_METRICS_PORT", "9102"))
 SCHEMA_PATH    = Path(os.getenv("SIM_SCHEMA_PATH", "simulator/schemas/telemetry.schema.json"))
+LESHAN_REGISTRY_URL = os.getenv("LESHAN_REGISTRY_URL")
+OTA_FAILURE_RATE = float(os.getenv("OTA_FAILURE_RATE", "0.05"))
 
 publishes_total = Counter(
     "edge_publishes_total",
@@ -96,6 +100,11 @@ schema_violations_total = Counter(
     "edge_schema_violations_total",
     "Simulator payloads rejected by the telemetry schema",
     ["component", "reason"],
+)
+ota_updates_total = Counter(
+    "edge_ota_updates_total",
+    "OTA update attempts handled by the simulator",
+    ["status"],
 )
 
 # ---------------------------------------------------------------------------
@@ -130,6 +139,8 @@ class EdgeClient:
         self.buffer = buffer
         self._connected = threading.Event()
         self._flush_lock = threading.Lock()   # one drain at a time
+        self._sensor_lock = threading.RLock()
+        self._sensors: dict[str, BinSensor] = {}
 
     # -- paho callbacks ----------------------------------------------------
 
@@ -141,6 +152,7 @@ class EdgeClient:
         logger.info(f"Connected to EMQX at {BROKER}:{PORT}")
         self._connected.set()
         mqtt_connected.labels(component="simulator").set(1)
+        _client.subscribe("commands/bin/+/firmware", qos=1)
         depth = self.buffer.depth()
         buffer_depth.labels(component="simulator").set(depth)
         if depth:
@@ -154,6 +166,61 @@ class EdgeClient:
             logger.warning(f"Unexpected MQTT disconnect (rc={rc}); spooling locally")
         else:
             logger.info("MQTT disconnected cleanly")
+
+    def on_message(self, _client: mqtt.Client, _userdata, msg: mqtt.MQTTMessage) -> None:
+        topic_parts = msg.topic.split("/")
+        if len(topic_parts) != 4 or topic_parts[:2] != ["commands", "bin"]:
+            return
+        bin_id = topic_parts[2]
+        with self._sensor_lock:
+            sensor = self._sensors.get(bin_id)
+        if sensor is None:
+            logger.warning(f"OTA command for unknown bin {bin_id}; ignoring")
+            return
+
+        try:
+            command = json.loads(msg.payload.decode("utf-8"))
+            target_version = str(command["version"])
+        except (KeyError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            logger.warning(f"Bad OTA command on {msg.topic}: {exc}")
+            self._publish_ota_ack(bin_id, "unknown", "failed", "bad_command")
+            return
+
+        failure_rate = float(command.get("failure_rate", OTA_FAILURE_RATE))
+        if random.random() < failure_rate:
+            ota_updates_total.labels(status="failed").inc()
+            self._publish_ota_ack(bin_id, target_version, "failed", "simulated_failure")
+            logger.warning(f"[{bin_id}] OTA update to {target_version} failed")
+            return
+
+        sensor.firmware_version = target_version
+        ota_updates_total.labels(status="ok").inc()
+        self._publish_ota_ack(bin_id, target_version, "ok", None)
+        logger.info(f"[{bin_id}] OTA update applied: firmware={target_version}")
+
+    def register_sensor(self, sensor: BinSensor) -> None:
+        with self._sensor_lock:
+            self._sensors[sensor.bin_id] = sensor
+
+    def _publish_ota_ack(
+        self,
+        bin_id: str,
+        version: str,
+        status: str,
+        reason: str | None,
+    ) -> None:
+        ack = {
+            "bin_id": bin_id,
+            "version": version,
+            "status": status,
+            "reason": reason,
+            "timestamp": _utc_now(),
+        }
+        self.client.publish(
+            f"commands/bin/{bin_id}/firmware/ack",
+            json.dumps(ack),
+            qos=1,
+        )
 
     # -- bin-thread interface ---------------------------------------------
 
@@ -209,6 +276,7 @@ def run_bin_loop(edge: EdgeClient, cfg: dict) -> None:
         firmware_version=FIRMWARE_VER,
         rng=random.Random(),
     )
+    edge.register_sensor(sensor)
     topic = sensor.telemetry_topic(prefix=TOPIC_PREFIX)
 
     logger.info(
@@ -224,6 +292,7 @@ def run_bin_loop(edge: EdgeClient, cfg: dict) -> None:
         elapsed_sim_hours = (elapsed_real_seconds * SPEED) / 3600.0
 
         payload = sensor.tick(elapsed_sim_hours=elapsed_sim_hours)
+        report_device(payload, sensor.zone_id, sensor.waste_category)
         try:
             TELEMETRY_VALIDATOR.validate(payload)
         except Exception as exc:
@@ -263,6 +332,36 @@ def run_bin_loop(edge: EdgeClient, cfg: dict) -> None:
 
 def _serialise(payload: dict) -> str:
     return json.dumps(payload)
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def report_device(payload: dict, zone_id: int, waste_category: str) -> None:
+    if not LESHAN_REGISTRY_URL:
+        return
+    body = json.dumps({
+        "bin_id": payload["bin_id"],
+        "firmware_version": payload["firmware_version"],
+        "last_seen": payload["timestamp"],
+        "battery_level_pct": payload["battery_level_pct"],
+        "zone_id": zone_id,
+        "waste_category": waste_category,
+        "online": True,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        f"{LESHAN_REGISTRY_URL.rstrip('/')}/devices/{payload['bin_id']}",
+        data=body,
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        urllib.request.urlopen(req, timeout=1).close()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        logger.debug(f"Device registry update failed: {exc}")
 
 
 def _load_validator() -> Draft202012Validator:
@@ -326,6 +425,7 @@ def main() -> None:
     edge = EdgeClient(client, buffer)
     client.on_connect = edge.on_connect
     client.on_disconnect = edge.on_disconnect
+    client.on_message = edge.on_message
 
     logger.info(f"Connecting to EMQX at {BROKER}:{PORT} ...")
     start_metrics_server()
