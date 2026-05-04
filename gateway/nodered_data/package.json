@@ -1,0 +1,10 @@
+{
+    "name": "node-red-project",
+    "description": "A Node-RED Project",
+    "version": "0.0.1",
+    "private": true,
+    "dependencies": {
+        "@prescient-devices/node-red-node-mqtt-in-json": "~1.2.3",
+        "@prescient-devices/node-red-node-mqtt-out-json": "~1.0.3"
+    }
+}

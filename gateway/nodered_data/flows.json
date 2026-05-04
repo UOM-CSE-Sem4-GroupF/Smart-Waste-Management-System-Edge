@@ -1,0 +1,268 @@
+[
+    {
+        "id": "f6f2187d.f17ca8",
+        "type": "tab",
+        "label": "Flow 1",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "3cc11d24.ff01a2",
+        "type": "comment",
+        "z": "f6f2187d.f17ca8",
+        "name": "WARNING: please check you have started this container with a volume that is mounted to /data\\n otherwise any flow changes are lost when you redeploy or upgrade the container\\n (e.g. upgrade to a more recent node-red docker image).\\n  If you are using named volumes you can ignore this warning.\\n Double click or see info side panel to learn how to start Node-RED in Docker to save your work",
+        "info": "\nTo start docker with a bind mount volume (-v option), for example:\n\n```\ndocker run -it -p 1880:1880 -v /home/user/node_red_data:/data --name mynodered nodered/node-red\n```\n\nwhere `/home/user/node_red_data` is a directory on your host machine where you want to store your flows.\n\nIf you do not do this then you can experiment and redploy flows, but if you restart or upgrade the container the flows will be disconnected and lost. \n\nThey will still exist in a hidden data volume, which can be recovered using standard docker techniques, but that is much more complex than just starting with a named volume as described above.",
+        "x": 350,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "b053e6c286e412b3",
+        "type": "mqtt in",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "topic": "test",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "98e8dd706363fdeb",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 170,
+        "y": 460,
+        "wires": [
+            [
+                "01aa4498df2785b2"
+            ]
+        ]
+    },
+    {
+        "id": "a9b1878bcc8e3702",
+        "type": "mqtt out",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "topic": "test_out",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "98e8dd706363fdeb",
+        "x": 820,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "b7917acd605b3b83",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "Dedup",
+        "func": "let lastMessages = context.get(\"lastMessages\") || {};\n\nlet bin = msg.payload.bin_id;\nlet value = msg.payload.fill_level_pct;\nlet now = Date.now();\n\nif (lastMessages[bin]) {\n    let last = lastMessages[bin];\n    if (last.value === value && (now - last.time < 60000)) {\n        return null; // drop duplicate\n    }\n}\n\nlastMessages[bin] = { value: value, time: now };\ncontext.set(\"lastMessages\", lastMessages);\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 320,
+        "wires": [
+            [
+                "ce45ec40431b8da9"
+            ]
+        ]
+    },
+    {
+        "id": "01aa4498df2785b2",
+        "type": "json",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "property": "payload",
+        "action": "",
+        "pretty": false,
+        "x": 350,
+        "y": 480,
+        "wires": [
+            [
+                "b7917acd605b3b83"
+            ]
+        ]
+    },
+    {
+        "id": "ce45ec40431b8da9",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "Sanity",
+        "func": "let fill = msg.payload.fill_level_pct;\nlet timestamp = new Date(msg.payload.timestamp).getTime();\nlet now = Date.now();\n\n// Check range\nif (fill < 0 || fill > 100) {\n    return null;\n}\n\n// Check stale data (older than 5 minutes)\nif (now - timestamp > 5 * 60 * 1000) {\n    return null;\n}\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 590,
+        "y": 420,
+        "wires": [
+            [
+                "c6d9dd2e8c7a1c26"
+            ]
+        ]
+    },
+    {
+        "id": "c6d9dd2e8c7a1c26",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "Buffer",
+        "func": "let buffer = context.get(\"buffer\") || [];\n\nlet cloudAvailable = flow.get(\"cloudAvailable\");\n\nif (cloudAvailable === undefined) {\n    cloudAvailable = true;\n}\n\nnode.warn(\"cloudAvailable = \" + cloudAvailable);\n\n\nif (!cloudAvailable) {\n    buffer.push(msg);\n\n    if (buffer.length > 1000) {\n        buffer.shift();\n    }\n\n    context.set(\"buffer\", buffer);\n    return null;\n}\n\n// flush buffer\nwhile (buffer.length > 0) {\n    let bufferedMsg = buffer.shift();\n    node.send(bufferedMsg);\n}\n\ncontext.set(\"buffer\", buffer);\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 770,
+        "y": 380,
+        "wires": [
+            [
+                "a9b1878bcc8e3702"
+            ]
+        ]
+    },
+    {
+        "id": "e1c17bcb0273f38d",
+        "type": "inject",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "true",
+        "payloadType": "bool",
+        "x": 230,
+        "y": 580,
+        "wires": [
+            [
+                "900df3b1afbac5fa"
+            ]
+        ]
+    },
+    {
+        "id": "900df3b1afbac5fa",
+        "type": "change",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "cloudAvailable",
+                "pt": "flow",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 560,
+        "y": 600,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "84864f06bc956c8a",
+        "type": "http in",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "url": "/health",
+        "method": "get",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 270,
+        "y": 700,
+        "wires": [
+            [
+                "c3cf55b7ecd206fe"
+            ]
+        ]
+    },
+    {
+        "id": "c3cf55b7ecd206fe",
+        "type": "function",
+        "z": "f6f2187d.f17ca8",
+        "name": "function 1",
+        "func": "msg.payload = { status: \"ok\" };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 700,
+        "wires": [
+            [
+                "417a4f92c6ec3516"
+            ]
+        ]
+    },
+    {
+        "id": "417a4f92c6ec3516",
+        "type": "http response",
+        "z": "f6f2187d.f17ca8",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 650,
+        "y": 700,
+        "wires": []
+    },
+    {
+        "id": "98e8dd706363fdeb",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "mosquitto",
+        "port": 1883,
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    }
+]
