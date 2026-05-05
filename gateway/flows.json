@@ -64,7 +64,11 @@
     "inputs": 0,
     "x": 160,
     "y": 120,
-    "wires": [["filter-telemetry"]]
+    "wires": [
+      [
+        "filter-telemetry"
+      ]
+    ]
   },
   {
     "id": "filter-telemetry",
@@ -79,7 +83,33 @@
     "libs": [],
     "x": 390,
     "y": 120,
-    "wires": [["telemetry-out"], ["dropped-debug"]]
+    "wires": [
+      [
+        "buffer-telemetry"
+      ],
+      [
+        "dropped-debug"
+      ]
+    ]
+  },
+  {
+    "id": "buffer-telemetry",
+    "type": "function",
+    "z": "edge-gateway-flow",
+    "name": "buffer if cloud unavailable",
+    "func": "let buffer = context.get('buffer') || [];\nlet cloudAvailable = flow.get('cloudAvailable');\nif (cloudAvailable === undefined) {\n    cloudAvailable = true;\n}\n\nif (!cloudAvailable) {\n    buffer.push(msg);\n    if (buffer.length > 1000) {\n        buffer.shift();\n    }\n    context.set('buffer', buffer);\n    node.status({fill:'yellow', shape:'ring', text:`buffered ${buffer.length}`});\n    return null;\n}\n\nwhile (buffer.length > 0) {\n    node.send(buffer.shift());\n}\ncontext.set('buffer', buffer);\nnode.status({fill:'green', shape:'dot', text:'forwarding'});\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 620,
+    "y": 100,
+    "wires": [
+      [
+        "telemetry-out"
+      ]
+    ]
   },
   {
     "id": "telemetry-out",
@@ -95,7 +125,7 @@
     "correl": "",
     "expiry": "",
     "broker": "cloud-mqtt",
-    "x": 640,
+    "x": 850,
     "y": 100,
     "wires": []
   },
@@ -127,7 +157,11 @@
     "swaggerDoc": "",
     "x": 150,
     "y": 260,
-    "wires": [["health-response"]]
+    "wires": [
+      [
+        "health-response"
+      ]
+    ]
   },
   {
     "id": "ready-in",
@@ -140,7 +174,11 @@
     "swaggerDoc": "",
     "x": 150,
     "y": 320,
-    "wires": [["health-response"]]
+    "wires": [
+      [
+        "health-response"
+      ]
+    ]
   },
   {
     "id": "health-response",
@@ -155,7 +193,11 @@
     "libs": [],
     "x": 380,
     "y": 290,
-    "wires": [["http-response"]]
+    "wires": [
+      [
+        "http-response"
+      ]
+    ]
   },
   {
     "id": "http-response",

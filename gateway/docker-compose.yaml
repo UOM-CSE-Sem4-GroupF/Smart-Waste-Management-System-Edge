@@ -1,6 +1,6 @@
 services:
   mosquitto:
-    image: eclipse-mosquitto
+    image: eclipse-mosquitto:2
     container_name: mosquitto
     ports:
       - "1883:1883"
@@ -8,7 +8,7 @@ services:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
   nodered:
-    image: nodered/node-red
+    image: nodered/node-red:3.1.0
     container_name: nodered
     ports:
       - "1880:1880"
