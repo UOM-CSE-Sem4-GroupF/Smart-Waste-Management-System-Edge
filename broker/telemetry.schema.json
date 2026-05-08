@@ -1,0 +1,63 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BinTelemetryPayload",
+  "description": "Flat telemetry payload published by each bin sensor",
+  "type": "object",
+  "required": [
+    "bin_id",
+    "fill_level_pct",
+    "battery_level_pct",
+    "signal_strength_dbm",
+    "temperature_c",
+    "timestamp",
+    "firmware_version",
+    "error_flags"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "bin_id": {
+      "type": "string",
+      "pattern": "^BIN-[0-9]{3,}$",
+      "description": "Unique bin identifier e.g. BIN-047"
+    },
+    "fill_level_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Fill level as a percentage 0–100"
+    },
+    "battery_level_pct": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Battery remaining as a percentage"
+    },
+    "signal_strength_dbm": {
+      "type": "number",
+      "minimum": -120,
+      "maximum": 0,
+      "description": "RSSI in dBm (negative value)"
+    },
+    "temperature_c": {
+      "type": "number",
+      "minimum": -40,
+      "maximum": 85,
+      "description": "Ambient temperature in Celsius"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 UTC timestamp"
+    },
+    "firmware_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semantic version of the bin firmware"
+    },
+    "error_flags": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bitmask of error conditions (0 = no errors)"
+    }
+  }
+}
