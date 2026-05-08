@@ -29,6 +29,15 @@ Check everything is up:
 docker compose ps
 ```
 
+Health and readiness probes:
+
+```bash
+curl http://localhost:9100/health
+curl http://localhost:9100/ready
+curl http://localhost:9101/health
+curl http://localhost:9101/ready
+```
+
 Open the EMQX dashboard: http://localhost:18083 (admin / admin123)
 Open the Kafka UI: http://localhost:8080
 
@@ -113,3 +122,10 @@ broker/
 │   └── requirements.txt
 └── README.md
 ```
+
+## Integration notes
+
+The current edge branch keeps the broker services in component subfolders instead of a flat
+broker directory. This matches the full-stack compose file and avoids duplicating the telemetry
+schema. The validator reads the canonical schema from `simulator/schemas/telemetry.schema.json`,
+so simulator, bridge, validator, and API-facing consumers agree on one payload contract.
