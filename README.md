@@ -3,8 +3,8 @@
 F1 owns the edge path for Group F's Smart Waste Management System:
 
 ```text
-simulated bins -> local Mosquitto -> Node-RED gateway -> EMQX -> Kafka
-                                      OTA commands -> simulated bins
+simulated bins or ESP32 hardware -> local Mosquitto -> Node-RED gateway -> EMQX -> Kafka
+                                                           OTA commands -> simulated bins
 ```
 
 This integration branch also includes Person 5 observability/CI work and the simulated Person 4 OTA path.
@@ -30,6 +30,23 @@ Useful URLs:
 | Grafana | http://localhost:3000 |
 
 Grafana login is `admin` / `admin`.
+
+## Hardware Mode
+
+The simulator remains the default for repeatable demos. To run the same edge
+pipeline with physical ESP32 collectors only, add the hardware overlay:
+
+```bash
+docker compose -f ops/docker-compose.full.yaml -f ops/docker-compose.hardware.yaml up -d --build
+```
+
+No firmware changes are required in this repo. The hardware owner only needs to
+flash a build that publishes to the Raspberry Pi/laptop IP on port `1884`.
+Physical device ids such as `BIN-EDGE-001` are accepted by the edge telemetry
+schema, and hardware mode normalizes the current firmware's fixed timestamp
+before forwarding.
+
+More details: `ops/hardware/README.md`.
 
 ## OTA Demo
 
@@ -72,6 +89,7 @@ RUN_E2E=1 pytest ops/integration -q
 ## Component Notes
 
 - `simulator.py` runs 10 simulated bins, validates telemetry against JSON Schema, buffers failed publishes in SQLite, exposes `/metrics`, and handles OTA commands.
+- `ops/docker-compose.hardware.yaml` disables the simulator producer so real ESP32 telemetry can drive the same path end to end.
 - `gateway/` contains the Node-RED flow for sanity filtering, deduplication, health endpoints, and MQTT forwarding.
 - `broker/` contains EMQX, Kafka, the MQTT-to-Kafka bridge, topic creation, and schema validator.
 - `leshan/` contains the Leshan demo server, simulated device registry, and OTA CLI.

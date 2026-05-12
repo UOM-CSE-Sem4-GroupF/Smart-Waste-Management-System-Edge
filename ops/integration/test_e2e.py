@@ -13,6 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 COMPOSE = ROOT / "ops" / "docker-compose.full.yaml"
+HARDWARE_COMPOSE = ROOT / "ops" / "docker-compose.hardware.yaml"
 
 
 def run_cmd(*args: str, timeout: int = 60) -> subprocess.CompletedProcess[str]:
@@ -49,6 +50,21 @@ def test_full_stack_compose_config_is_valid():
     assert "swms-schema-validator" in result.stdout
 
 
+def test_hardware_compose_config_disables_demo_simulator_by_default():
+    result = run_cmd(
+        "docker",
+        "compose",
+        "-f",
+        str(COMPOSE),
+        "-f",
+        str(HARDWARE_COMPOSE),
+        "config",
+    )
+    assert "swms-nodered" in result.stdout
+    assert "swms-emqx-bridge" in result.stdout
+    assert "swms-edge-simulator" not in result.stdout
+
+
 def test_observability_assets_are_valid():
     dashboard = json.loads(
         (ROOT / "ops" / "grafana" / "dashboards" / "edge-overview.json").read_text(
@@ -68,6 +84,10 @@ def test_gateway_flow_has_dedup_and_health_nodes():
     flow = json.loads((ROOT / "gateway" / "flows.json").read_text(encoding="utf-8"))
     function_nodes = [node for node in flow if node.get("type") == "function"]
     assert any("dedup" in node.get("name", "") for node in function_nodes)
+    assert any(
+        "ALLOW_STALE_HARDWARE_TIMESTAMPS" in node.get("func", "")
+        for node in function_nodes
+    )
     assert any(node.get("url") == "/health" for node in flow)
     assert any(node.get("url") == "/ready" for node in flow)
 
