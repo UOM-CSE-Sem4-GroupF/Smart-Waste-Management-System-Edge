@@ -1,0 +1,19 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: simulator
+    static_configs:
+      - targets: ["simulator:9102"]
+
+  - job_name: emqx_bridge
+    static_configs:
+      - targets: ["emqx-bridge:9100"]
+
+  - job_name: schema_validator
+    static_configs:
+      - targets: ["validator:9101"]
+
+  - job_name: device_registry
+    static_configs:
+      - targets: ["registry:8090"]

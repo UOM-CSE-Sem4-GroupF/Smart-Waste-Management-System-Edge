@@ -1,0 +1,155 @@
+services:
+  emqx:
+    image: emqx/emqx:5.3.0
+    container_name: emqx
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "8083:8083"
+      - "8084:8084"
+      - "8883:8883"
+      - "18083:18083"
+    environment:
+      EMQX_NAME: emqx
+      EMQX_HOST: 127.0.0.1
+      EMQX_DASHBOARD__DEFAULT_USERNAME: admin
+      EMQX_DASHBOARD__DEFAULT_PASSWORD: ${EMQX_DASHBOARD_PASSWORD:-admin123}
+      EMQX_ALLOW_ANONYMOUS: "true"
+    volumes:
+      - ./emqx/config/acl.conf:/opt/emqx/etc/acl.conf
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    healthcheck:
+      test: ["CMD", "emqx", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - broker-net
+    user: "1000:1000"
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo ruok | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - broker-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    restart: unless-stopped
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    networks:
+      - broker-net
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/scripts/create-topics.sh"]
+    volumes:
+      - ./scripts/create-topics.sh:/scripts/create-topics.sh
+    networks:
+      - broker-net
+
+  kafka-ui:
+    image: redpandadata/console:v2.3.8
+    container_name: kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_BROKERS: kafka:29092
+    networks:
+      - broker-net
+
+  emqx-bridge:
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    container_name: emqx-bridge
+    restart: unless-stopped
+    depends_on:
+      emqx:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "9100:9100"
+    environment:
+      EMQX_HOST: emqx
+      EMQX_PORT: 1883
+      EMQX_USERNAME: ${EMQX_BRIDGE_USERNAME:-sensor-device}
+      EMQX_PASSWORD: ${EMQX_BRIDGE_PASSWORD:-sensorpass}
+      KAFKA_BOOTSTRAP: kafka:29092
+      METRICS_PORT: 9100
+    networks:
+      - broker-net
+
+  validator:
+    build:
+      context: ..
+      dockerfile: broker/validator/Dockerfile
+    container_name: schema-validator
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "9101:9101"
+    environment:
+      KAFKA_BOOTSTRAP: kafka:29092
+      KAFKA_TOPIC: waste.bin.telemetry
+      SCHEMA_PATH: /app/telemetry.schema.json
+      METRICS_PORT: 9101
+    networks:
+      - broker-net
+    user: "1000:1000"
+
+volumes:
+  emqx_data:
+  emqx_log:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+
+networks:
+  broker-net:
+    driver: bridge
