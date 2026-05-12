@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import random
+import socket
 import threading
 import time
 import urllib.error
@@ -57,6 +58,7 @@ USER         = os.getenv("MQTT_USER")
 PASS         = os.getenv("MQTT_PASSWORD")
 TOPIC_PREFIX = os.getenv("MQTT_TOPIC_PREFIX", "sensors")
 FIRMWARE_VER = os.getenv("FIRMWARE_VERSION", "2.1.4")
+CLIENT_ID    = os.getenv("MQTT_CLIENT_ID", f"swms-edge-simulator-{socket.gethostname()}")
 
 # SIM_SPEED_FACTOR compresses time so intervals behave realistically at desk-demo speed.
 # 1.0 = real time (10-min sleep between low-fill readings).
@@ -432,7 +434,7 @@ def main() -> None:
     if buffer.depth():
         logger.info(f"Resuming with {buffer.depth()} message(s) already spooled")
 
-    client = mqtt.Client(client_id="swms-edge-simulator")
+    client = mqtt.Client(client_id=CLIENT_ID)
     if USER:
         client.username_pw_set(USER, PASS)
 
