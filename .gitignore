@@ -34,6 +34,10 @@ venv.bak
 # Docker
 .dockerignore
 
+# Node-RED runtime data
+gateway/nodered_data/.npm
+gateway/nodered_data/node_modules
+
 # IDEs
 .vscode/
 .idea/

@@ -1,55 +1,77 @@
-# leshan/ — Person 4: Device Management & OTA Engineer
+# leshan/ — Device Management and Simulated OTA
 
-Eclipse Leshan server running in Docker, plus the OTA (Over-The-Air) firmware-update command path. Each simulated bin registers with Leshan on startup and reports its current firmware version. A CLI pushes a firmware command to one or all bins; the simulator acknowledges and updates its reported version.
+This directory provides the Person 4 demo path while hardware work is handled separately:
 
-> Full task spec: see [`../TEAM_TASKS.md` § Person 4](../TEAM_TASKS.md#person-4--device-management--ota-engineer-leshan)
+- Local Leshan-style demo UI in Docker.
+- A lightweight HTTP device registry for simulator heartbeats and firmware versions.
+- An MQTT OTA CLI that sends firmware commands and waits for simulator acknowledgements.
 
-## MVP milestones (in order)
-
-1. **Leshan up in Docker** — web UI on `localhost:8080`.
-2. **Many bins register** — every simulator instance shows up with version + heartbeat.
-3. **OTA command end-to-end** — CLI → simulator receives → Leshan UI shows new version within 30s.
-4. **Bulk update + failure handling** — `--all` works; ~5% of bins fail with logged reason.
-
-## Files to create
-
-```
-leshan/
-├── docker-compose.yaml
-├── cli/
-│   ├── push_update.py           # ./push_update.py --version 2.2.0 --bin BIN-001
-│   └── requirements.txt
-└── README.md
-```
-
-Plus a small client added to the simulator (coordinate with Person 1):
-```
-../simulator/leshan_client.py
-```
-
-## MQTT topics owned by this component
-
-```
-commands/bin/<BIN_ID>/firmware       # push: { "version": "2.2.0", "url": "..." }
-commands/bin/<BIN_ID>/firmware/ack   # ack:  { "status": "ok" | "failed", "reason": "..." }
-```
-
-## Getting started
+## Run
 
 ```bash
-cd leshan/
+cd leshan
 docker compose up
-# Leshan UI at http://localhost:8080
-# In another terminal:
-cd cli/
-python push_update.py --all --version 2.2.0
 ```
 
-## Branch convention
+Local URLs:
 
-`p4/<short-task>` — e.g., `p4/leshan-stack`, `p4/ota-cli`, `p4/registration-client`.
+- Leshan-style demo UI: http://localhost:8081
+- Simulated device registry: http://localhost:8090/devices
 
-## Dependencies
+The simulator reports to the registry when `LESHAN_REGISTRY_URL` is set:
 
-- Hard: Person 1's `BinSensor` class — Person 4 adds an LwM2M client to it.
-- Soft: Person 3's MQTT broker to publish OTA commands through.
+```bash
+LESHAN_REGISTRY_URL=http://localhost:8090 python ../simulator.py
+```
+
+## Push Firmware
+
+Install CLI dependencies:
+
+```bash
+pip install -r cli/requirements.txt
+```
+
+Single bin:
+
+```bash
+python cli/push_update.py --bin BIN-001 --version 2.2.0
+```
+
+Default simulated fleet:
+
+```bash
+python cli/push_update.py --all --version 2.2.0
+```
+
+Use `--failure-rate 0` for a clean demo, or keep the default `0.05` to show failure handling.
+
+## MQTT Topics
+
+```text
+commands/bin/<BIN_ID>/firmware
+commands/bin/<BIN_ID>/firmware/ack
+```
+
+Command payload:
+
+```json
+{
+  "version": "2.2.0",
+  "url": "http://leshan.local/firmware/2.2.0.bin",
+  "requested_at": "2026-05-04T10:00:00Z",
+  "failure_rate": 0.05
+}
+```
+
+Ack payload:
+
+```json
+{
+  "bin_id": "BIN-001",
+  "version": "2.2.0",
+  "status": "ok",
+  "reason": null,
+  "timestamp": "2026-05-04T10:00:05Z"
+}
+```

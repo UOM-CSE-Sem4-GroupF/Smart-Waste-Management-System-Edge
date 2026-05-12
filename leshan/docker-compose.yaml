@@ -1,0 +1,18 @@
+services:
+  leshan:
+    build:
+      context: ./mock
+      dockerfile: Dockerfile
+    container_name: swms-leshan-demo
+    ports:
+      - "8081:8080"
+    restart: unless-stopped
+
+  registry:
+    build:
+      context: ./registry
+      dockerfile: Dockerfile
+    container_name: swms-device-registry
+    ports:
+      - "8090:8090"
+    restart: unless-stopped
