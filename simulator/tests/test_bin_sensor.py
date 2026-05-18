@@ -342,6 +342,15 @@ class TestSchemaConformance:
                 json.dumps(payload)
                 del tick_n
 
+    def test_physical_edge_bin_id_validates(
+        self, validator: Draft202012Validator
+    ) -> None:
+        payload = make_sensor(bin_id="BIN-EDGE-001").tick(
+            elapsed_sim_hours=0.1,
+            now=FIXED_NOW,
+        )
+        validator.validate(payload)
+
     def test_missing_required_field_fails(
         self, validator: Draft202012Validator
     ) -> None:

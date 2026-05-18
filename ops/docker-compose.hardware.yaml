@@ -1,0 +1,20 @@
+# Hardware overlay for the full edge stack.
+#
+# Usage:
+#   docker compose -f ops/docker-compose.full.yaml -f ops/docker-compose.hardware.yaml up -d --build
+#
+# This keeps Mosquitto -> Node-RED -> EMQX -> Kafka running, but places the
+# simulator behind the optional `demo` profile so physical ESP32 telemetry is
+# the only producer unless the profile is explicitly enabled.
+
+services:
+  nodered:
+    environment:
+      # The current hardware firmware commit emits a fixed timestamp. In
+      # hardware mode only, normalize stale but parseable timestamps at the
+      # gateway so the existing collector can still drive the pipeline.
+      ALLOW_STALE_HARDWARE_TIMESTAMPS: "true"
+
+  simulator:
+    profiles:
+      - demo

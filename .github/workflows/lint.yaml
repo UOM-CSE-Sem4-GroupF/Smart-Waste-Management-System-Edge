@@ -1,0 +1,50 @@
+name: lint
+
+on:
+  pull_request:
+  push:
+    branches: [main, p5/integration-demo-stack]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r broker/bridge/requirements.txt
+          pip install -r broker/validator/requirements.txt
+          pip install -r leshan/cli/requirements.txt
+
+      - name: Python compile check
+        run: |
+          python -m py_compile \
+            simulator.py \
+            simulator/bin_sensor.py \
+            simulator/buffer.py \
+            broker/bridge/bridge.py \
+            broker/validator/main.py \
+            leshan/cli/push_update.py \
+            leshan/registry/server.py \
+            gateway/tests/test_gateway.py \
+            ops/integration/test_e2e.py
+
+      - name: JSON validation
+        run: |
+          python -m json.tool gateway/flows.json >/tmp/flows.json
+          python -m json.tool ops/grafana/dashboards/edge-overview.json >/tmp/dashboard.json
+
+      - name: Docker Compose config validation
+        run: |
+          docker compose config
+          docker compose -f broker/docker-compose.yaml config
+          docker compose -f gateway/docker-compose.yaml config
+          docker compose -f leshan/docker-compose.yaml config
+          docker compose -f ops/docker-compose.full.yaml config

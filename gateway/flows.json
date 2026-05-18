@@ -1,219 +1,213 @@
 [
-    {
-        "id": "f6f2187d.f17ca8",
-        "type": "tab",
-        "label": "Flow 1",
-        "disabled": false,
-        "info": ""
-    },
-    {
-        "id": "3cc11d24.ff01a2",
-        "type": "comment",
-        "z": "f6f2187d.f17ca8",
-        "name": "WARNING: please check you have started this container with a volume that is mounted to /data\\n otherwise any flow changes are lost when you redeploy or upgrade the container\\n (e.g. upgrade to a more recent node-red docker image).\\n  If you are using named volumes you can ignore this warning.\\n Double click or see info side panel to learn how to start Node-RED in Docker to save your work",
-        "info": "\nTo start docker with a bind mount volume (-v option), for example:\n\n```\ndocker run -it -p 1880:1880 -v /home/user/node_red_data:/data --name mynodered nodered/node-red\n```\n\nwhere `/home/user/node_red_data` is a directory on your host machine where you want to store your flows.\n\nIf you do not do this then you can experiment and redploy flows, but if you restart or upgrade the container the flows will be disconnected and lost. \n\nThey will still exist in a hidden data volume, which can be recovered using standard docker techniques, but that is much more complex than just starting with a named volume as described above.",
-        "x": 350,
-        "y": 80,
-        "wires": []
-    },
-    {
-        "id": "b053e6c286e412b3",
-        "type": "mqtt in",
-        "z": "f6f2187d.f17ca8",
-        "name": "",
-        "topic": "test",
-        "qos": "2",
-        "datatype": "auto-detect",
-        "broker": "98e8dd706363fdeb",
-        "nl": false,
-        "rap": true,
-        "rh": 0,
-        "inputs": 0,
-        "x": 170,
-        "y": 460,
-        "wires": [
-            [
-                "01aa4498df2785b2"
-            ]
-        ]
-    },
-    {
-        "id": "a9b1878bcc8e3702",
-        "type": "mqtt out",
-        "z": "f6f2187d.f17ca8",
-        "name": "",
-        "topic": "test_out",
-        "qos": "",
-        "retain": "",
-        "respTopic": "",
-        "contentType": "",
-        "userProps": "",
-        "correl": "",
-        "expiry": "",
-        "broker": "98e8dd706363fdeb",
-        "x": 820,
-        "y": 280,
-        "wires": []
-    },
-    {
-        "id": "b7917acd605b3b83",
-        "type": "function",
-        "z": "f6f2187d.f17ca8",
-        "name": "Dedup",
-        "func": "let lastMessages = context.get(\"lastMessages\") || {};\n\nlet bin = msg.payload.bin_id;\nlet value = msg.payload.fill_level_pct;\nlet now = Date.now();\n\nif (lastMessages[bin]) {\n    let last = lastMessages[bin];\n    if (last.value === value && (now - last.time < 60000)) {\n        return null; // drop duplicate\n    }\n}\n\nlastMessages[bin] = { value: value, time: now };\ncontext.set(\"lastMessages\", lastMessages);\n\nreturn msg;\n",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 430,
-        "y": 320,
-        "wires": [
-            [
-                "ce45ec40431b8da9"
-            ]
-        ]
-    },
-    {
-        "id": "01aa4498df2785b2",
-        "type": "json",
-        "z": "f6f2187d.f17ca8",
-        "name": "",
-        "property": "payload",
-        "action": "",
-        "pretty": false,
-        "x": 350,
-        "y": 480,
-        "wires": [
-            [
-                "b7917acd605b3b83"
-            ]
-        ]
-    },
-    {
-        "id": "ce45ec40431b8da9",
-        "type": "function",
-        "z": "f6f2187d.f17ca8",
-        "name": "Sanity",
-        "func": "let fill = msg.payload.fill_level_pct;\nlet timestamp = new Date(msg.payload.timestamp).getTime();\nlet now = Date.now();\n\n// Check range\nif (fill < 0 || fill > 100) {\n    return null;\n}\n\n// Check stale data (older than 5 minutes)\nif (now - timestamp > 5 * 60 * 1000) {\n    return null;\n}\n\nreturn msg;\n",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 590,
-        "y": 420,
-        "wires": [
-            [
-                "c6d9dd2e8c7a1c26"
-            ]
-        ]
-    },
-    {
-        "id": "c6d9dd2e8c7a1c26",
-        "type": "function",
-        "z": "f6f2187d.f17ca8",
-        "name": "Buffer",
-        "func": "let buffer = context.get(\"buffer\") || [];\n\nlet cloudAvailable = flow.get(\"cloudAvailable\");\n\nif (cloudAvailable === undefined) {\n    cloudAvailable = true;\n}\n\nnode.warn(\"cloudAvailable = \" + cloudAvailable);\n\n\nif (!cloudAvailable) {\n    buffer.push(msg);\n\n    if (buffer.length > 1000) {\n        buffer.shift();\n    }\n\n    context.set(\"buffer\", buffer);\n    return null;\n}\n\n// flush buffer\nwhile (buffer.length > 0) {\n    let bufferedMsg = buffer.shift();\n    node.send(bufferedMsg);\n}\n\ncontext.set(\"buffer\", buffer);\n\nreturn msg;\n",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 770,
-        "y": 380,
-        "wires": [
-            [
-                "a9b1878bcc8e3702"
-            ]
-        ]
-    },
-    {
-        "id": "e1c17bcb0273f38d",
-        "type": "inject",
-        "z": "f6f2187d.f17ca8",
-        "name": "",
-        "props": [
-            {
-                "p": "payload"
-            },
-            {
-                "p": "topic",
-                "vt": "str"
-            }
-        ],
-        "repeat": "",
-        "crontab": "",
-        "once": false,
-        "onceDelay": 0.1,
-        "topic": "",
-        "payload": "true",
-        "payloadType": "bool",
-        "x": 230,
-        "y": 580,
-        "wires": [
-            [
-                "900df3b1afbac5fa"
-            ]
-        ]
-    },
-    {
-        "id": "900df3b1afbac5fa",
-        "type": "change",
-        "z": "f6f2187d.f17ca8",
-        "name": "",
-        "rules": [
-            {
-                "t": "set",
-                "p": "cloudAvailable",
-                "pt": "flow",
-                "to": "payload",
-                "tot": "msg"
-            }
-        ],
-        "action": "",
-        "property": "",
-        "from": "",
-        "to": "",
-        "reg": false,
-        "x": 560,
-        "y": 600,
-        "wires": [
-            []
-        ]
-    },
-    {
-        "id": "98e8dd706363fdeb",
-        "type": "mqtt-broker",
-        "name": "",
-        "broker": "mosquitto",
-        "port": 1883,
-        "clientid": "",
-        "autoConnect": true,
-        "usetls": false,
-        "protocolVersion": 4,
-        "keepalive": 60,
-        "cleansession": true,
-        "autoUnsubscribe": true,
-        "birthTopic": "",
-        "birthQos": "0",
-        "birthRetain": "false",
-        "birthPayload": "",
-        "birthMsg": {},
-        "closeTopic": "",
-        "closeQos": "0",
-        "closeRetain": "false",
-        "closePayload": "",
-        "closeMsg": {},
-        "willTopic": "",
-        "willQos": "0",
-        "willRetain": "false",
-        "willPayload": "",
-        "willMsg": {},
-        "userProps": "",
-        "sessionExpiry": ""
+  {
+    "id": "edge-gateway-flow",
+    "type": "tab",
+    "label": "SWMS Edge Gateway",
+    "disabled": false,
+    "info": "Local Mosquitto -> sanity/dedup -> cloud EMQX"
+  },
+  {
+    "id": "local-mqtt",
+    "type": "mqtt-broker",
+    "name": "local-mosquitto",
+    "broker": "${MQTT_BROKER}",
+    "port": "${MQTT_PORT}",
+    "clientid": "swms-node-red-gateway-local",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "sessionExpiry": ""
+  },
+  {
+    "id": "cloud-mqtt",
+    "type": "mqtt-broker",
+    "name": "cloud-emqx",
+    "broker": "${CLOUD_MQTT_BROKER}",
+    "port": "${CLOUD_MQTT_PORT}",
+    "clientid": "swms-node-red-gateway-cloud",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "credentials": {
+      "user": "${CLOUD_MQTT_USER}",
+      "password": "${CLOUD_MQTT_PASSWORD}"
     }
+  },
+  {
+    "id": "telemetry-in",
+    "type": "mqtt in",
+    "z": "edge-gateway-flow",
+    "name": "bin telemetry in",
+    "topic": "sensors/bin/+/telemetry",
+    "qos": "1",
+    "datatype": "utf8",
+    "broker": "local-mqtt",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 120,
+    "wires": [
+      [
+        "filter-telemetry"
+      ]
+    ]
+  },
+  {
+    "id": "filter-telemetry",
+    "type": "function",
+    "z": "edge-gateway-flow",
+    "name": "sanity + dedup",
+    "func": "const now = Date.now();\nlet payload = msg.payload;\nif (typeof payload === 'string') {\n    try {\n        payload = JSON.parse(payload);\n    } catch (err) {\n        node.status({fill:'red', shape:'ring', text:'bad json'});\n        msg.drop_reason = 'bad_json';\n        return [null, msg];\n    }\n}\n\nconst fill = Number(payload.fill_level_pct);\nconst ts = Date.parse(payload.timestamp);\nconst allowStaleHardwareTimestamps = String(env.get('ALLOW_STALE_HARDWARE_TIMESTAMPS') || '').toLowerCase() === 'true';\nif (!payload.bin_id || Number.isNaN(fill) || fill < 0 || fill > 100 || Number.isNaN(ts)) {\n    node.status({fill:'yellow', shape:'ring', text:'sanity drop'});\n    msg.payload = payload;\n    msg.drop_reason = 'sanity';\n    return [null, msg];\n}\n\nif (now - ts > 5 * 60 * 1000) {\n    if (!allowStaleHardwareTimestamps) {\n        node.status({fill:'yellow', shape:'ring', text:'stale drop'});\n        msg.payload = payload;\n        msg.drop_reason = 'stale_timestamp';\n        return [null, msg];\n    }\n    payload.timestamp = new Date(now).toISOString().replace(/\\.\\d{3}Z$/, 'Z');\n    msg.timestamp_normalized = true;\n}\n\nconst dedup = context.get('dedup') || {};\nconst key = payload.bin_id;\nconst last = dedup[key];\nif (last && last.fill === fill && now - last.at < 60 * 1000) {\n    node.status({fill:'grey', shape:'ring', text:'dedup drop'});\n    msg.payload = payload;\n    msg.drop_reason = 'dedup';\n    return [null, msg];\n}\n\ndedup[key] = {fill, at: now};\ncontext.set('dedup', dedup);\nmsg.payload = JSON.stringify(payload);\nmsg.topic = `sensors/bin/${payload.bin_id}/telemetry`;\nnode.status({fill:'green', shape:'dot', text:`forward ${payload.bin_id}`});\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 390,
+    "y": 120,
+    "wires": [
+      [
+        "buffer-telemetry"
+      ],
+      [
+        "dropped-debug"
+      ]
+    ]
+  },
+  {
+    "id": "buffer-telemetry",
+    "type": "function",
+    "z": "edge-gateway-flow",
+    "name": "buffer if cloud unavailable",
+    "func": "let buffer = context.get('buffer') || [];\nlet cloudAvailable = flow.get('cloudAvailable');\nif (cloudAvailable === undefined) {\n    cloudAvailable = true;\n}\n\nif (!cloudAvailable) {\n    buffer.push(msg);\n    if (buffer.length > 1000) {\n        buffer.shift();\n    }\n    context.set('buffer', buffer);\n    node.status({fill:'yellow', shape:'ring', text:`buffered ${buffer.length}`});\n    return null;\n}\n\nwhile (buffer.length > 0) {\n    node.send(buffer.shift());\n}\ncontext.set('buffer', buffer);\nnode.status({fill:'green', shape:'dot', text:'forwarding'});\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 620,
+    "y": 100,
+    "wires": [
+      [
+        "telemetry-out"
+      ]
+    ]
+  },
+  {
+    "id": "telemetry-out",
+    "type": "mqtt out",
+    "z": "edge-gateway-flow",
+    "name": "forward to EMQX",
+    "topic": "",
+    "qos": "1",
+    "retain": false,
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "cloud-mqtt",
+    "x": 850,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "dropped-debug",
+    "type": "debug",
+    "z": "edge-gateway-flow",
+    "name": "dropped telemetry",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "drop_reason",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 650,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "health-in",
+    "type": "http in",
+    "z": "edge-gateway-flow",
+    "name": "GET /health",
+    "url": "/health",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 260,
+    "wires": [
+      [
+        "health-response"
+      ]
+    ]
+  },
+  {
+    "id": "ready-in",
+    "type": "http in",
+    "z": "edge-gateway-flow",
+    "name": "GET /ready",
+    "url": "/ready",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 150,
+    "y": 320,
+    "wires": [
+      [
+        "health-response"
+      ]
+    ]
+  },
+  {
+    "id": "health-response",
+    "type": "function",
+    "z": "edge-gateway-flow",
+    "name": "ok response",
+    "func": "msg.statusCode = 200;\nmsg.headers = {'content-type': 'application/json'};\nmsg.payload = {status: 'ok', component: 'gateway'};\nreturn msg;",
+    "outputs": 1,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 380,
+    "y": 290,
+    "wires": [
+      [
+        "http-response"
+      ]
+    ]
+  },
+  {
+    "id": "http-response",
+    "type": "http response",
+    "z": "edge-gateway-flow",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 620,
+    "y": 290,
+    "wires": []
+  }
 ]
